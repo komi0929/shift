@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { generateDateRange, formatDate, getDayName, isHoliday, isSaturday, isSunday, formatDateFull, toDateString } from '@/lib/dates';
 import Image from 'next/image';
-import Link from 'next/link';
 
 interface ShiftEvent {
   id: string;
@@ -21,10 +20,13 @@ interface DisabledSlot {
 export default function AdminEditPage() {
   const params = useParams();
   const shiftId = params.shiftId as string;
+  const router = useRouter();
 
   const [event, setEvent] = useState<ShiftEvent | null>(null);
+  const [initialDisabledSlots, setInitialDisabledSlots] = useState<Set<string>>(new Set());
   const [disabledSlots, setDisabledSlots] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState('');
 
@@ -47,7 +49,8 @@ export default function AdminEditPage() {
     if (slotsData) {
       const set = new Set<string>();
       slotsData.forEach((s: DisabledSlot) => set.add(`${s.slot_date}:${s.slot_type}`));
-      setDisabledSlots(set);
+      setInitialDisabledSlots(new Set(set));
+      setDisabledSlots(new Set(set));
     }
 
     setLoading(false);
@@ -57,39 +60,77 @@ export default function AdminEditPage() {
     fetchData();
   }, [fetchData]);
 
-  const toggleSlot = async (date: Date, slotType: string) => {
+  const hasUnsavedChanges = useMemo(() => {
+    if (initialDisabledSlots.size !== disabledSlots.size) return true;
+    for (const key of Array.from(disabledSlots)) {
+      if (!initialDisabledSlots.has(key)) return true;
+    }
+    return false;
+  }, [initialDisabledSlots, disabledSlots]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  const handleNavigation = (e: React.MouseEvent, path: string) => {
+    e.preventDefault();
+    if (hasUnsavedChanges) {
+      if (!window.confirm('保存されていない変更があります。破棄して移動しますか？')) return;
+    }
+    router.push(path);
+  };
+
+  const toggleSlot = (date: Date, slotType: string) => {
     const dateStr = toDateString(date);
     const key = `${dateStr}:${slotType}`;
 
-    if (disabledSlots.has(key)) {
-      // Enable the slot (remove from disabled)
-      await supabase
-        .from('disabled_slots')
-        .delete()
-        .eq('shift_event_id', shiftId)
-        .eq('slot_date', dateStr)
-        .eq('slot_type', slotType);
+    setDisabledSlots(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
-      setDisabledSlots(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    } else {
-      // Disable the slot (add to disabled)
-      await supabase
-        .from('disabled_slots')
-        .insert({
-          shift_event_id: shiftId,
-          slot_date: dateStr,
-          slot_type: slotType,
+  const saveChanges = async () => {
+    setSubmitting(true);
+    const toInsert = Array.from(disabledSlots).filter(k => !initialDisabledSlots.has(k));
+    const toDelete = Array.from(initialDisabledSlots).filter(k => !disabledSlots.has(k));
+
+    try {
+      if (toDelete.length > 0) {
+        for (const key of toDelete) {
+          const [date, type] = key.split(':');
+          await supabase.from('disabled_slots')
+            .delete()
+            .eq('shift_event_id', shiftId)
+            .eq('slot_date', date)
+            .eq('slot_type', type);
+        }
+      }
+
+      if (toInsert.length > 0) {
+        const insertData = toInsert.map(key => {
+          const [date, type] = key.split(':');
+          return { shift_event_id: shiftId, slot_date: date, slot_type: type };
         });
+        await supabase.from('disabled_slots').insert(insertData);
+      }
 
-      setDisabledSlots(prev => {
-        const next = new Set(prev);
-        next.add(key);
-        return next;
-      });
+      setInitialDisabledSlots(new Set(disabledSlots));
+      showToast('設定を保存しました');
+    } catch (err) {
+      console.error(err);
+      showToast('保存に失敗しました');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -120,7 +161,7 @@ export default function AdminEditPage() {
         <div className="empty-state">
           <h3>募集が見つかりません</h3>
           <p>指定されたシフト募集は存在しません。</p>
-          <Link href="/" className="btn btn-primary">ホームに戻る</Link>
+          <a href="/" className="btn btn-primary">ホームに戻る</a>
         </div>
       </div>
     );
@@ -132,27 +173,38 @@ export default function AdminEditPage() {
     <>
       <header className="app-header">
         <div className="flex items-center gap-12">
-          <Link href="/" style={{ textDecoration: 'none', color: 'var(--accent)', fontSize: 14, fontWeight: 500 }}>
+          <a href="/" onClick={(e) => handleNavigation(e, '/')} style={{ textDecoration: 'none', color: 'var(--accent)', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
             ← 戻る
-          </Link>
+          </a>
           <Image src="/logo.png" alt="Shift." width={80} height={26} style={{ objectFit: 'contain' }} />
         </div>
         <div className="flex gap-8">
-          <Link href={`/admin/${shiftId}/dashboard`} className="btn btn-ghost btn-sm">
+          <a href={`/admin/${shiftId}/dashboard`} onClick={(e) => handleNavigation(e, `/admin/${shiftId}/dashboard`)} className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
             ダッシュボード
-          </Link>
+          </a>
         </div>
       </header>
 
       <div className="page-container">
-        <div style={{ marginBottom: 32 }}>
-          <h1>募集枠の編集</h1>
-          <p className="mt-8">
-            {formatDateFull(new Date(event.start_date + 'T00:00:00'))} 〜 {formatDateFull(new Date(event.end_date + 'T00:00:00'))}
-          </p>
-          <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4 }}>
-            各枠をクリックして有効/無効を切り替えます。無効な枠はスタッフ画面でグレーアウトされます。
-          </p>
+        <div className="flex items-center justify-between" style={{ marginBottom: 32, flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <h1>募集枠の編集</h1>
+            <p className="mt-8">
+              {formatDateFull(new Date(event.start_date + 'T00:00:00'))} 〜 {formatDateFull(new Date(event.end_date + 'T00:00:00'))}
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4 }}>
+              各枠をクリックして有効/無効を切り替えます。
+            </p>
+          </div>
+          <div>
+            <button 
+              className={`btn ${hasUnsavedChanges ? 'btn-primary' : 'btn-secondary'}`} 
+              onClick={saveChanges}
+              disabled={!hasUnsavedChanges || submitting}
+            >
+              {submitting ? '保存中...' : hasUnsavedChanges ? '● 変更を保存する' : '変更はありません'}
+            </button>
+          </div>
         </div>
 
         {/* Share URL Section */}
@@ -171,7 +223,7 @@ export default function AdminEditPage() {
         </div>
 
         {/* Shift Table */}
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ overflowX: 'auto', paddingBottom: 80 }}>
           <table className="shift-table">
             <thead>
               <tr>
