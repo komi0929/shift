@@ -399,14 +399,24 @@ textarea.input-field {
   color: var(--text-secondary);
   background: #FAFAFA;
   border-bottom: 1px solid var(--border-light);
+  border-right: 1px solid var(--border-light);
   text-align: center;
+}
+
+.shift-table th:last-child {
+  border-right: none;
 }
 
 .shift-table td {
   padding: 0;
   border-bottom: 1px solid var(--border-light);
+  border-right: 1px solid var(--border-light);
   text-align: center;
   vertical-align: middle;
+}
+
+.shift-table td:last-child {
+  border-right: none;
 }
 
 .shift-table tr:last-child td {
@@ -481,7 +491,7 @@ textarea.input-field {
 }
 
 .slot-cell.disabled::after {
-  content: "ー";
+  content: "✕";
   font-size: 16px;
   color: var(--disabled-text);
   position: absolute;
