@@ -1,66 +1,173 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+'use client';
 
-export default function Home() {
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+import { formatDateFull } from '@/lib/dates';
+import Image from 'next/image';
+import Link from 'next/link';
+
+interface ShiftEvent {
+  id: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+}
+
+export default function AdminHome() {
+  const [events, setEvents] = useState<ShiftEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const fetchEvents = useCallback(async () => {
+    const { data } = await supabase
+      .from('shift_events')
+      .select('*')
+      .order('created_at', { ascending: false });
+    setEvents(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  const handleCreate = async () => {
+    if (!startDate || !endDate) return;
+    setCreating(true);
+
+    const { error } = await supabase
+      .from('shift_events')
+      .insert({ start_date: startDate, end_date: endDate });
+
+    if (!error) {
+      setShowModal(false);
+      setStartDate('');
+      setEndDate('');
+      fetchEvents();
+    }
+    setCreating(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('この募集を削除しますか？関連するすべてのデータが削除されます。')) return;
+    await supabase.from('shift_events').delete().eq('id', id);
+    fetchEvents();
+  };
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      <header className="app-header">
+        <div className="flex items-center gap-12">
+          <Image src="/logo.png" alt="Shift." width={100} height={32} className="app-logo" style={{ objectFit: 'contain' }} />
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          新規募集
+        </button>
+      </header>
+
+      <div className="page-container">
+        <div style={{ marginBottom: 32 }}>
+          <h1>シフト募集</h1>
+          <p className="mt-8">募集イベントを作成し、スタッフにURLを共有してシフトを収集します。</p>
         </div>
-      </main>
-    </div>
+
+        {loading ? (
+          <div className="empty-state">
+            <p>読み込み中...</p>
+          </div>
+        ) : events.length === 0 ? (
+          <div className="empty-state">
+            <Image src="/empty-state.png" alt="データなし" width={200} height={200} />
+            <h3>まだ募集がありません</h3>
+            <p>「新規募集」ボタンから最初のシフト募集を作成しましょう。</p>
+            <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+              最初の募集を作成
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 16 }}>
+            {events.map((event, index) => (
+              <div
+                key={event.id}
+                className="card"
+                style={{ animationDelay: `${index * 0.05}s`, animation: 'fadeInUp 0.4s ease forwards', opacity: 0 }}
+              >
+                <div className="flex items-center justify-between" style={{ flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <div className="flex items-center gap-8 mb-8">
+                      <span className="badge badge-blue">
+                        {formatDateFull(new Date(event.start_date + 'T00:00:00'))} 〜 {formatDateFull(new Date(event.end_date + 'T00:00:00'))}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
+                      作成: {new Date(event.created_at).toLocaleDateString('ja-JP')}
+                    </p>
+                  </div>
+                  <div className="flex gap-8" style={{ flexWrap: 'wrap' }}>
+                    <Link href={`/admin/${event.id}`} className="btn btn-secondary btn-sm">
+                      枠を編集
+                    </Link>
+                    <Link href={`/admin/${event.id}/dashboard`} className="btn btn-primary btn-sm">
+                      ダッシュボード
+                    </Link>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(event.id)} style={{ color: 'var(--danger)' }}>
+                      削除
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h2>新規シフト募集</h2>
+            <p className="mb-24">シフトを収集する期間を指定してください。</p>
+
+            <div className="flex-col gap-16">
+              <div className="input-group">
+                <label className="input-label">開始日</label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="input-group">
+                <label className="input-label">終了日</label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  min={startDate}
+                />
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowModal(false)}>
+                キャンセル
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleCreate}
+                disabled={!startDate || !endDate || creating}
+              >
+                {creating ? '作成中...' : '募集を作成'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
