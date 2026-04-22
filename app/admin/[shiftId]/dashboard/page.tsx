@@ -49,11 +49,36 @@ export default function DashboardPage() {
 
   const dates = generateDateRange(event.start_date, event.end_date);
   const visibleSubs = submissions.filter(s => showHidden || !s.is_hidden);
-  const activeSubs = submissions.filter(s => !s.is_hidden);
-  const heatmap: Record<string, number> = {};
-  activeSubs.forEach(sub => { sub.selected_slots.forEach(slot => { const k = `${slot.date}:${slot.slot_type}`; heatmap[k] = (heatmap[k] || 0) + 1; }); });
-  const maxCount = Math.max(1, ...Object.values(heatmap));
-  const getHeatBg = (c: number) => c === 0 ? 'transparent' : `rgba(0, 113, 227, ${0.1 + Math.min(c / maxCount, 1) * 0.4})`;
+  
+  const rows = dates.flatMap(d => [
+    { dateStr: toDateString(d), slotType: 'morning', date: d },
+    { dateStr: toDateString(d), slotType: 'afternoon', date: d }
+  ]);
+
+  const copyToClipboard = () => {
+    let tsv = '日付\t曜日\t枠';
+    visibleSubs.forEach(sub => {
+      tsv += `\t${sub.staff_name}`;
+    });
+    tsv += '\n';
+
+    rows.forEach(row => {
+      const ds = row.dateStr;
+      const dateFormatted = formatDate(row.date);
+      const dayName = getDayName(row.date);
+      const slotLabel = row.slotType === 'morning' ? '前半' : '後半';
+      
+      let line = `${dateFormatted}\t${dayName}\t${slotLabel}`;
+      visibleSubs.forEach(sub => {
+        const hasSlot = sub.selected_slots.some(s => s.date === ds && s.slot_type === row.slotType);
+        line += `\t${hasSlot ? '◯' : ''}`;
+      });
+      tsv += line + '\n';
+    });
+
+    navigator.clipboard.writeText(tsv);
+    showToastMsg('エクセル用にコピーしました');
+  };
 
   return (
     <>
@@ -64,12 +89,12 @@ export default function DashboardPage() {
         </div>
         <Link href="/" className="btn btn-ghost btn-sm">ホーム</Link>
       </header>
-      <div className="page-container">
+      <div className="page-container" style={{ maxWidth: '100%' }}>
         <div style={{ marginBottom: 32 }}>
           <h1>集計ダッシュボード</h1>
           <p className="mt-8">{formatDateFull(new Date(event.start_date + 'T00:00:00'))} 〜 {formatDateFull(new Date(event.end_date + 'T00:00:00'))}</p>
           <div className="flex items-center gap-16 mt-16">
-            <span className="badge badge-blue">{activeSubs.length} 件の提出</span>
+            <span className="badge badge-blue">{submissions.filter(s => !s.is_hidden).length} 件の提出</span>
             {submissions.some(s => s.is_hidden) && (
               <button className="btn btn-ghost btn-sm" onClick={() => setShowHidden(!showHidden)} style={{ fontSize: 12 }}>
                 {showHidden ? '非表示を隠す' : `非表示を含める (${submissions.filter(s => s.is_hidden).length}件)`}
@@ -79,50 +104,81 @@ export default function DashboardPage() {
         </div>
 
         <div className="card mb-24">
-          <h3 className="mb-16">希望集計ヒートマップ</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="shift-table" style={{ boxShadow: 'none', border: 'none' }}>
-              <thead><tr><th style={{ textAlign: 'left', paddingLeft: 16 }}>日付</th><th>前半</th><th>後半</th></tr></thead>
-              <tbody>
-                {dates.map(date => {
-                  const ds = toDateString(date);
-                  const hol = isHoliday(date); const sat = isSaturday(date); const sun = isSunday(date);
-                  const mc = heatmap[`${ds}:morning`] || 0; const ac = heatmap[`${ds}:afternoon`] || 0;
-                  let dc = 'date-cell'; if (hol || sun) dc += ' holiday'; else if (sat) dc += ' saturday';
-                  const cellStyle = (c: number): React.CSSProperties => ({ background: getHeatBg(c), textAlign: 'center', padding: '14px 16px', fontWeight: c > 0 ? 600 : 400, color: c > 0 ? 'var(--accent)' : 'var(--text-tertiary)', fontSize: 14 });
-                  return (<tr key={ds}><td className={dc}>{formatDate(date)}<span className="day-name">({getDayName(date)})</span></td><td style={cellStyle(mc)}>{mc > 0 ? mc : '—'}</td><td style={cellStyle(ac)}>{ac > 0 ? ac : '—'}</td></tr>);
-                })}
-              </tbody>
-            </table>
+          <div className="flex items-center justify-between mb-16" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <h3 style={{ margin: 0 }}>シフト提出マトリクス</h3>
+            <button className="btn btn-secondary btn-sm" onClick={copyToClipboard}>
+              📋 エクセル用にコピー
+            </button>
           </div>
+          
+          {visibleSubs.length === 0 ? (
+            <div className="empty-state" style={{ padding: '40px 0' }}>
+              <Image src="/empty-state.png" alt="提出なし" width={120} height={120} />
+              <h3 style={{ marginTop: 16 }}>まだ提出がありません</h3>
+              <p>共有URLをスタッフに送信しましょう。</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto', paddingBottom: 16 }}>
+              <table className="shift-table" style={{ whiteSpace: 'nowrap', borderCollapse: 'collapse', border: 'none', boxShadow: 'none' }}>
+                <thead>
+                  <tr>
+                    <th style={{ position: 'sticky', left: 0, background: '#FAFAFA', zIndex: 10, borderRight: '1px solid var(--border-light)' }}>日付</th>
+                    <th style={{ position: 'sticky', left: 100, background: '#FAFAFA', zIndex: 10, borderRight: '1px solid var(--border-light)' }}>枠</th>
+                    {visibleSubs.map(sub => (
+                      <th key={sub.id} style={{ minWidth: 100, borderBottom: '1px solid var(--border-light)' }}>
+                        <div className="flex-col items-center gap-4">
+                          <span style={{ opacity: sub.is_hidden ? 0.5 : 1 }}>{sub.staff_name}</span>
+                          <div className="flex gap-4 justify-center" style={{ opacity: 0.7 }}>
+                            <button onClick={() => toggleHidden(sub)} style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>{sub.is_hidden ? '表示' : '非表示'}</button>
+                            <button onClick={() => deleteSub(sub)} style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}>削除</button>
+                          </div>
+                          {sub.notes && (
+                            <span title={sub.notes} style={{ fontSize: 10, background: '#F0F0F0', padding: '2px 6px', borderRadius: 4, marginTop: 4, cursor: 'help', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis' }}>📝 備考</span>
+                          )}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => {
+                    const ds = row.dateStr;
+                    const hol = isHoliday(row.date);
+                    const sat = isSaturday(row.date);
+                    const sun = isSunday(row.date);
+                    let dc = 'date-cell';
+                    if (hol || sun) dc += ' holiday';
+                    else if (sat) dc += ' saturday';
+                    
+                    const isMorning = row.slotType === 'morning';
+                    
+                    return (
+                      <tr key={`${ds}-${row.slotType}`}>
+                        {isMorning && (
+                          <td rowSpan={2} className={dc} style={{ position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1, borderRight: '1px solid var(--border-light)', borderBottom: '1px solid var(--border-light)' }}>
+                            {formatDate(row.date)}
+                            <span className="day-name">({getDayName(row.date)})</span>
+                          </td>
+                        )}
+                        <td style={{ position: 'sticky', left: 100, background: 'var(--card)', zIndex: 1, fontSize: 13, color: 'var(--text-secondary)', borderRight: '1px solid var(--border-light)', borderBottom: isMorning ? 'none' : '1px solid var(--border-light)' }}>
+                          {isMorning ? '前半' : '後半'}
+                        </td>
+                        {visibleSubs.map(sub => {
+                          const hasSlot = sub.selected_slots.some(s => s.date === ds && s.slot_type === row.slotType);
+                          return (
+                            <td key={sub.id} style={{ background: hasSlot ? (sub.is_hidden ? '#F0F0F0' : 'var(--accent-light)') : 'transparent', color: hasSlot ? (sub.is_hidden ? '#999' : 'var(--accent)') : 'transparent', fontWeight: 600, textAlign: 'center', fontSize: 18, borderBottom: isMorning ? 'none' : '1px solid var(--border-light)' }}>
+                              {hasSlot ? '◯' : ''}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-
-        <h3 className="mb-16">提出一覧</h3>
-        {visibleSubs.length === 0 ? (
-          <div className="empty-state"><Image src="/empty-state.png" alt="提出なし" width={160} height={160} /><h3>まだ提出がありません</h3><p>共有URLをスタッフに送信しましょう。</p></div>
-        ) : (
-          <div style={{ display: 'grid', gap: 12 }}>
-            {visibleSubs.map((sub, i) => (
-              <div key={sub.id} className="card" style={{ animationDelay: `${i * 0.03}s`, animation: 'fadeInUp 0.3s ease forwards', opacity: sub.is_hidden ? 0.5 : 0 }}>
-                <div className="flex items-center justify-between mb-8" style={{ flexWrap: 'wrap', gap: 8 }}>
-                  <div className="flex items-center gap-8">
-                    <h3 style={{ fontSize: 16 }}>{sub.staff_name}</h3>
-                    {sub.is_hidden && <span className="badge" style={{ background: '#F0F0F0', color: '#999', fontSize: 11 }}>非表示</span>}
-                  </div>
-                  <div className="flex gap-8">
-                    <button className="btn btn-ghost btn-sm" onClick={() => toggleHidden(sub)} style={{ fontSize: 12 }}>{sub.is_hidden ? '表示' : '非表示'}</button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => deleteSub(sub)} style={{ color: 'var(--danger)', fontSize: 12 }}>削除</button>
-                  </div>
-                </div>
-                <div className="flex gap-8" style={{ flexWrap: 'wrap', marginBottom: sub.notes ? 12 : 0 }}>
-                  {sub.selected_slots.map((slot, j) => { const sd = new Date(slot.date + 'T00:00:00'); return (<span key={j} className="badge badge-blue" style={{ fontSize: 11 }}>{formatDate(sd)}({getDayName(sd)}) {slot.slot_type === 'morning' ? '前半' : '後半'}</span>); })}
-                </div>
-                {sub.notes && <p style={{ fontSize: 13, color: 'var(--text-secondary)', background: '#F9F9FB', padding: '8px 12px', borderRadius: 8 }}>📝 {sub.notes}</p>}
-                <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8 }}>提出: {new Date(sub.submitted_at).toLocaleString('ja-JP')}</p>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
       <div className={`toast ${toast ? 'show' : ''}`}>{toast}</div>
     </>
