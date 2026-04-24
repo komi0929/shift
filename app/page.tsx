@@ -11,6 +11,7 @@ interface ShiftEvent {
   start_date: string;
   end_date: string;
   created_at: string;
+  mode: 'store' | 'factory';
 }
 
 export default function AdminHome() {
@@ -19,6 +20,7 @@ export default function AdminHome() {
   const [showModal, setShowModal] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [mode, setMode] = useState<'store' | 'factory'>('store');
   const [creating, setCreating] = useState(false);
 
   const fetchEvents = useCallback(async () => {
@@ -40,12 +42,13 @@ export default function AdminHome() {
 
     const { error } = await supabase
       .from('shift_events')
-      .insert({ start_date: startDate, end_date: endDate });
+      .insert({ start_date: startDate, end_date: endDate, mode });
 
     if (!error) {
       setShowModal(false);
       setStartDate('');
       setEndDate('');
+      setMode('store');
       fetchEvents();
     }
     setCreating(false);
@@ -102,6 +105,9 @@ export default function AdminHome() {
                       <span className="badge badge-blue">
                         {formatDateFull(new Date(event.start_date + 'T00:00:00'))} 〜 {formatDateFull(new Date(event.end_date + 'T00:00:00'))}
                       </span>
+                      <span className={`badge ${event.mode === 'factory' ? 'badge-green' : ''}`} style={event.mode !== 'factory' ? { background: '#F0F0F0', color: '#666' } : {}}>
+                        {event.mode === 'factory' ? '製造モード' : '店舗モード'}
+                      </span>
                     </div>
                     <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
                       作成: {new Date(event.created_at).toLocaleDateString('ja-JP')}
@@ -129,7 +135,23 @@ export default function AdminHome() {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <h2>新規シフト募集</h2>
-            <p className="mb-24">シフトを収集する期間を指定してください。</p>
+            <p className="mb-24">シフトを収集する期間とモードを指定してください。</p>
+
+            <div className="flex-col gap-16 mb-24">
+              <div className="input-group">
+                <label className="input-label">募集モード</label>
+                <div className="flex gap-16 mt-8">
+                  <label className="flex items-center gap-8" style={{ cursor: 'pointer' }}>
+                    <input type="radio" name="mode" value="store" checked={mode === 'store'} onChange={() => setMode('store')} />
+                    <span>店舗スタッフ（前半/後半）</span>
+                  </label>
+                  <label className="flex items-center gap-8" style={{ cursor: 'pointer' }}>
+                    <input type="radio" name="mode" value="factory" checked={mode === 'factory'} onChange={() => setMode('factory')} />
+                    <span>製造スタッフ（1時間刻み）</span>
+                  </label>
+                </div>
+              </div>
+            </div>
 
             <div className="flex-col gap-16">
               <div className="input-group">
@@ -153,7 +175,7 @@ export default function AdminHome() {
               </div>
             </div>
 
-            <div className="modal-actions">
+            <div className="modal-actions mt-32">
               <button className="btn btn-ghost" onClick={() => setShowModal(false)}>
                 キャンセル
               </button>

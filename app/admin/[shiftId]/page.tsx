@@ -10,12 +10,15 @@ interface ShiftEvent {
   id: string;
   start_date: string;
   end_date: string;
+  mode: 'store' | 'factory';
 }
 
 interface DisabledSlot {
   slot_date: string;
   slot_type: string;
 }
+
+const FACTORY_SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
 
 export default function AdminEditPage() {
   const params = useParams();
@@ -38,7 +41,7 @@ export default function AdminEditPage() {
       .single();
 
     if (eventData) {
-      setEvent(eventData);
+      setEvent(eventData as ShiftEvent);
     }
 
     const { data: slotsData } = await supabase
@@ -168,6 +171,7 @@ export default function AdminEditPage() {
   }
 
   const dates = generateDateRange(event.start_date, event.end_date);
+  const isFactory = event.mode === 'factory';
 
   return (
     <>
@@ -188,7 +192,7 @@ export default function AdminEditPage() {
       <div className="page-container">
         <div className="flex items-center justify-between" style={{ marginBottom: 32, flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <h1>募集枠の編集</h1>
+            <h1>{isFactory ? '募集枠の編集（製造）' : '募集枠の編集（店舗）'}</h1>
             <p className="mt-8">
               {formatDateFull(new Date(event.start_date + 'T00:00:00'))} 〜 {formatDateFull(new Date(event.end_date + 'T00:00:00'))}
             </p>
@@ -224,12 +228,20 @@ export default function AdminEditPage() {
 
         {/* Shift Table */}
         <div style={{ overflowX: 'auto', paddingBottom: 80 }}>
-          <table className="shift-table">
+          <table className="shift-table" style={isFactory ? { whiteSpace: 'nowrap' } : {}}>
             <thead>
               <tr>
                 <th style={{ textAlign: 'left', paddingLeft: 16 }}>日付</th>
-                <th>前半<br/><span style={{ fontSize: 10, fontWeight: 400, opacity: 0.6 }}>10:45〜16:30</span></th>
-                <th>後半<br/><span style={{ fontSize: 10, fontWeight: 400, opacity: 0.6 }}>16:30〜22:00</span></th>
+                {isFactory ? (
+                  FACTORY_SLOTS.map(time => (
+                    <th key={time} style={{ minWidth: 60 }}>{time}</th>
+                  ))
+                ) : (
+                  <>
+                    <th>前半<br/><span style={{ fontSize: 10, fontWeight: 400, opacity: 0.6 }}>10:45〜16:30</span></th>
+                    <th>後半<br/><span style={{ fontSize: 10, fontWeight: 400, opacity: 0.6 }}>16:30〜22:00</span></th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -238,8 +250,6 @@ export default function AdminEditPage() {
                 const holiday = isHoliday(date);
                 const sat = isSaturday(date);
                 const sun = isSunday(date);
-                const morningDisabled = disabledSlots.has(`${dateStr}:morning`);
-                const afternoonDisabled = disabledSlots.has(`${dateStr}:afternoon`);
 
                 let dateClass = 'date-cell';
                 if (holiday || sun) dateClass += ' holiday';
@@ -251,14 +261,30 @@ export default function AdminEditPage() {
                       {formatDate(date)}
                       <span className="day-name">({getDayName(date)})</span>
                     </td>
-                    <td
-                      className={`slot-cell-admin ${morningDisabled ? 'disabled-slot' : 'enabled'}`}
-                      onClick={() => toggleSlot(date, 'morning')}
-                    />
-                    <td
-                      className={`slot-cell-admin ${afternoonDisabled ? 'disabled-slot' : 'enabled'}`}
-                      onClick={() => toggleSlot(date, 'afternoon')}
-                    />
+                    
+                    {isFactory ? (
+                      FACTORY_SLOTS.map(time => {
+                        const disabled = disabledSlots.has(`${dateStr}:${time}`);
+                        return (
+                          <td
+                            key={time}
+                            className={`slot-cell-admin ${disabled ? 'disabled-slot' : 'enabled'}`}
+                            onClick={() => toggleSlot(date, time)}
+                          />
+                        );
+                      })
+                    ) : (
+                      <>
+                        <td
+                          className={`slot-cell-admin ${disabledSlots.has(`${dateStr}:morning`) ? 'disabled-slot' : 'enabled'}`}
+                          onClick={() => toggleSlot(date, 'morning')}
+                        />
+                        <td
+                          className={`slot-cell-admin ${disabledSlots.has(`${dateStr}:afternoon`) ? 'disabled-slot' : 'enabled'}`}
+                          onClick={() => toggleSlot(date, 'afternoon')}
+                        />
+                      </>
+                    )}
                   </tr>
                 );
               })}
